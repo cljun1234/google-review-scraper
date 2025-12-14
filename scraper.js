@@ -365,7 +365,25 @@ class GoogleMapsReviewsScraper {
       await this.init();
       await this.launchBrowser();
       await this.navigateToUrl();
-      await this.clickReviewsTab();
+
+      // Retry mechanism for clicking reviews tab (up to 3 attempts)
+      const maxRetries = 3;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          await this.clickReviewsTab();
+          break; // Success, exit loop
+        } catch (error) {
+          if (attempt === maxRetries) {
+            throw error; // Propagate error on final attempt
+          }
+          this.logger.warn(`Attempt ${attempt} to open reviews tab failed: ${error.message}. Refreshing page...`);
+          const spinner = display.startSpinner(`Refreshing page (Attempt ${attempt + 1}/${maxRetries})...`);
+          await this.page.reload({ waitUntil: 'domcontentloaded' });
+          await this.page.waitForSelector('[role="main"]', { timeout: 10000 });
+          display.succeedSpinner('Page refreshed');
+        }
+      }
+
       await this.setSortOrder();
       await this.scrollAndLoadReviews();
       await this.expandAllReviews();
