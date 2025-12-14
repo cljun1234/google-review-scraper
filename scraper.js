@@ -207,6 +207,33 @@ class GoogleMapsReviewsScraper {
     this.logger.info(`Scroll completed. Reviews found: ${previousReviewCount}${targetCount ? ` (target: ${targetCount})` : ''}`);
     return previousReviewCount;
   }
+  async expandAllReviews() {
+    const spinner = display.startSpinner('Expanding reviews...');
+    try {
+      const expandedCount = await this.page.evaluate(async () => {
+        const buttons = document.querySelectorAll('button[aria-label="See more"]');
+        let count = 0;
+        for (const btn of buttons) {
+          btn.click();
+          count++;
+        }
+        // Give a small delay for DOM updates
+        if (count > 0) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+        return count;
+      });
+      if (expandedCount > 0) {
+        display.succeedSpinner(`Expanded ${expandedCount} reviews`);
+        this.logger.info(`Expanded ${expandedCount} reviews`);
+      } else {
+        display.succeedSpinner('No reviews needed expansion');
+      }
+    } catch (error) {
+      display.failSpinner('Failed to expand reviews');
+      this.logger.error(`Expansion error: ${error.message}`);
+    }
+  }
   async extractReviews() {
     const spinner = display.startSpinner('Extracting review data...');
     const reviews = await this.page.evaluate(() => {
@@ -323,6 +350,7 @@ class GoogleMapsReviewsScraper {
       await this.clickReviewsTab();
       await this.setSortOrder();
       await this.scrollAndLoadReviews();
+      await this.expandAllReviews();
       let reviews = await this.extractReviews();
       reviews = this.processDates(reviews);
       reviews = await this.downloadImages(reviews);
