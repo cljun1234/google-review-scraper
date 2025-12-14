@@ -79,8 +79,26 @@ class GoogleMapsReviewsScraper {
   }
   async clickReviewsTab() {
     const spinner = display.startSpinner('Opening reviews tab...');
-    await this.page.waitForSelector('button[aria-label*="Reviews"]', { timeout: 8000 });
-    await this.page.click('button[aria-label*="Reviews"]');
+    try {
+      await this.page.waitForSelector('button[aria-label*="Reviews"]', { timeout: 15000 });
+      await this.page.click('button[aria-label*="Reviews"]');
+    } catch (error) {
+      this.logger.warn(`Standard reviews tab selector failed: ${error.message}. Trying fallback...`);
+      // Fallback: Try finding by text content
+      const clicked = await this.page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const reviewBtn = buttons.find(b => b.textContent && b.textContent.trim() === 'Reviews');
+        if (reviewBtn) {
+          reviewBtn.click();
+          return true;
+        }
+        return false;
+      });
+
+      if (!clicked) {
+        throw new Error('Could not find Reviews tab button');
+      }
+    }
     await utils.sleep(1500);
     display.succeedSpinner('Reviews tab opened');
     this.logger.info('Reviews tab clicked');
