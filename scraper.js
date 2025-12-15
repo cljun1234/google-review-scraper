@@ -79,8 +79,26 @@ class GoogleMapsReviewsScraper {
   }
   async clickReviewsTab() {
     const spinner = display.startSpinner('Opening reviews tab...');
-    await this.page.waitForSelector('button[aria-label*="Reviews"]', { timeout: 8000 });
-    await this.page.click('button[aria-label*="Reviews"]');
+    try {
+      await this.page.waitForSelector('button[aria-label*="Reviews"]', { timeout: 15000 });
+      await this.page.click('button[aria-label*="Reviews"]');
+    } catch (error) {
+      this.logger.warn(`Standard reviews tab selector failed: ${error.message}. Trying fallback...`);
+      // Fallback: Try finding by text content
+      const clicked = await this.page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const reviewBtn = buttons.find(b => b.textContent && b.textContent.trim() === 'Reviews');
+        if (reviewBtn) {
+          reviewBtn.click();
+          return true;
+        }
+        return false;
+      });
+
+      if (!clicked) {
+        throw new Error('Could not find Reviews tab button');
+      }
+    }
     await utils.sleep(1500);
     display.succeedSpinner('Reviews tab opened');
     this.logger.info('Reviews tab clicked');
@@ -207,6 +225,33 @@ class GoogleMapsReviewsScraper {
     this.logger.info(`Scroll completed. Reviews found: ${previousReviewCount}${targetCount ? ` (target: ${targetCount})` : ''}`);
     return previousReviewCount;
   }
+  async expandAllReviews() {
+    const spinner = display.startSpinner('Expanding reviews...');
+    try {
+      const expandedCount = await this.page.evaluate(async () => {
+        const buttons = document.querySelectorAll('button[aria-label="See more"]');
+        let count = 0;
+        for (const btn of buttons) {
+          btn.click();
+          count++;
+        }
+        // Give a small delay for DOM updates
+        if (count > 0) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+        return count;
+      });
+      if (expandedCount > 0) {
+        display.succeedSpinner(`Expanded ${expandedCount} reviews`);
+        this.logger.info(`Expanded ${expandedCount} reviews`);
+      } else {
+        display.succeedSpinner('No reviews needed expansion');
+      }
+    } catch (error) {
+      display.failSpinner('Failed to expand reviews');
+      this.logger.error(`Expansion error: ${error.message}`);
+    }
+  }
   async extractReviews() {
     const spinner = display.startSpinner('Extracting review data...');
     const reviews = await this.page.evaluate(() => {
@@ -320,9 +365,28 @@ class GoogleMapsReviewsScraper {
       await this.init();
       await this.launchBrowser();
       await this.navigateToUrl();
-      await this.clickReviewsTab();
+
+      // Retry mechanism for clicking reviews tab (up to 3 attempts)
+      const maxRetries = 3;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          await this.clickReviewsTab();
+          break; // Success, exit loop
+        } catch (error) {
+          if (attempt === maxRetries) {
+            throw error; // Propagate error on final attempt
+          }
+          this.logger.warn(`Attempt ${attempt} to open reviews tab failed: ${error.message}. Refreshing page...`);
+          const spinner = display.startSpinner(`Refreshing page (Attempt ${attempt + 1}/${maxRetries})...`);
+          await this.page.reload({ waitUntil: 'domcontentloaded' });
+          await this.page.waitForSelector('[role="main"]', { timeout: 10000 });
+          display.succeedSpinner('Page refreshed');
+        }
+      }
+
       await this.setSortOrder();
       await this.scrollAndLoadReviews();
+      await this.expandAllReviews();
       let reviews = await this.extractReviews();
       reviews = this.processDates(reviews);
       reviews = await this.downloadImages(reviews);
